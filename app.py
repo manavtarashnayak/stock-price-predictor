@@ -7,38 +7,51 @@ from plotly.subplots import make_subplots
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from scipy.stats import binomtest
 import ta
 
 st.set_page_config(
-    page_title="Stock Price Movement Predictor",
-    page_icon="📈",
+    page_title="Easy Stock Price Predictor",
+    page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Title & Header
-st.title("📈 Leak-Free Stock Price Movement Predictor")
-st.markdown("""
-Predicting next-day stock price directional movement (Up / Down) using Machine Learning with strict leak-free temporal evaluation and dual baselines.
-""")
+# Header with Beginner Guide
+st.title("🤖 Beginner-Friendly AI Stock Predictor")
+st.caption("Simple, data-backed next-day stock price predictions using Machine Learning.")
 
-# Sidebar Controls
-st.sidebar.header("⚙️ Configuration")
-ticker_option = st.sidebar.selectbox("Select Stock Ticker", ["AAPL", "NVDA", "TSLA", "MSFT", "GOOGL", "AMZN", "BTC-USD", "Custom..."])
-if ticker_option == "Custom...":
-    ticker = st.sidebar.text_input("Enter Ticker Symbol", "AAPL").upper()
+# Sidebar Configuration
+st.sidebar.header("1️⃣ Select Stock")
+
+# Quick Buttons or Selectbox
+preset_stocks = {
+    "Apple (AAPL)": "AAPL",
+    "Tesla (TSLA)": "TSLA",
+    "NVIDIA (NVDA)": "NVDA",
+    "Microsoft (MSFT)": "MSFT",
+    "Amazon (AMZN)": "AMZN",
+    "Bitcoin (BTC-USD)": "BTC-USD",
+    "S&P 500 ETF (SPY)": "SPY"
+}
+
+selected_name = st.sidebar.selectbox("Choose a popular stock:", list(preset_stocks.keys()))
+custom_input = st.sidebar.text_input("...or type any ticker symbol:", "").strip().upper()
+
+if custom_input:
+    ticker = custom_input
 else:
-    ticker = ticker_option
+    ticker = preset_stocks[selected_name]
 
-start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2018-01-01"))
-end_date = st.sidebar.date_input("End Date", pd.to_datetime("today"))
-test_ratio = st.sidebar.slider("Test Set Split Ratio", 0.1, 0.3, 0.2, step=0.05)
+st.sidebar.header("2️⃣ Advanced Options (Optional)")
+user_mode = st.sidebar.radio("Display Mode:", ["🌱 Beginner Mode (Simplified)", "🔬 Expert Mode (Detailed Technicals)"])
+
+test_ratio = 0.2
 
 @st.cache_data(ttl=3600)
-def load_and_prep_data(ticker_symbol, start, end):
-    df = yf.download(ticker_symbol, start=start, end=end)
+def load_and_prep_data(ticker_symbol):
+    df = yf.download(ticker_symbol, start="2018-01-01")
     if df.empty:
         return None
     if isinstance(df.columns, pd.MultiIndex):
@@ -55,14 +68,14 @@ def load_and_prep_data(ticker_symbol, start, end):
     df = df.dropna()
     return df
 
-with st.spinner(f"Fetching market data for {ticker}..."):
-    df = load_and_prep_data(ticker, start_date, end_date)
+with st.spinner(f"Analyzing {ticker} historical market data..."):
+    df = load_and_prep_data(ticker)
 
 if df is None or len(df) < 100:
-    st.error(f"Not enough historical data found for '{ticker}'. Please check the ticker symbol or expand the date range.")
+    st.error(f"⚠️ Could not load data for **'{ticker}'**. Please double-check the ticker symbol (e.g. AAPL, TSLA, MSFT).")
     st.stop()
 
-# Train / Test Split
+# Chronological Train / Test Split
 split_idx = int(len(df) * (1 - test_ratio))
 train = df.iloc[:split_idx].copy()
 test = df.iloc[split_idx:].copy()
@@ -70,126 +83,105 @@ test = df.iloc[split_idx:].copy()
 features_raw = ['Open', 'High', 'Low', 'Close', 'Volume']
 features_eng = features_raw + ['rsi', 'macd', 'sma_20']
 
-# Scaling (Fit on Train ONLY to avoid temporal data leakage)
-scaler_raw = StandardScaler().fit(train[features_raw])
-X_train_raw = scaler_raw.transform(train[features_raw])
-X_test_raw = scaler_raw.transform(test[features_raw])
-
+# Scaling
 scaler_eng = StandardScaler().fit(train[features_eng])
 X_train_eng = scaler_eng.transform(train[features_eng])
 X_test_eng = scaler_eng.transform(test[features_eng])
 
-# Model Training
-model_lr_raw = LogisticRegression(max_iter=1000).fit(X_train_raw, train['target'])
-model_lr_eng = LogisticRegression(max_iter=1000).fit(X_train_eng, train['target'])
-
-model_rf_raw = RandomForestClassifier(n_estimators=200, max_depth=5, random_state=42).fit(X_train_raw, train['target'])
-model_rf_eng = RandomForestClassifier(n_estimators=200, max_depth=5, random_state=42).fit(X_train_eng, train['target'])
-
-# Predictions
-pred_lr_raw = model_lr_raw.predict(X_test_raw)
-pred_lr_eng = model_lr_eng.predict(X_test_eng)
-pred_rf_raw = model_rf_raw.predict(X_test_raw)
-pred_rf_eng = model_rf_eng.predict(X_test_eng)
+# Model Training (Random Forest)
+model_rf = RandomForestClassifier(n_estimators=200, max_depth=5, random_state=42).fit(X_train_eng, train['target'])
+pred_rf = model_rf.predict(X_test_eng)
 
 # Baselines
-persistence_pred = test['target'].shift(1).bfill()
 majority_class = train['target'].mode()[0]
 majority_pred = np.full(len(test), majority_class)
+majority_acc = accuracy_score(test['target'], majority_pred)
+model_acc = accuracy_score(test['target'], pred_rf)
 
-# Metrics calculation
-def get_metrics(y_true, y_pred):
-    return {
-        'Accuracy': accuracy_score(y_true, y_pred),
-        'Precision': precision_score(y_true, y_pred, zero_division=0),
-        'Recall': recall_score(y_true, y_pred, zero_division=0),
-        'F1-Score': f1_score(y_true, y_pred, zero_division=0)
-    }
+# Next-Day Forecast
+latest_features = scaler_eng.transform(df[features_eng].iloc[[-1]])
+latest_prob = model_rf.predict_proba(latest_features)[0]
+latest_pred = model_rf.predict(latest_features)[0]
+latest_close = float(df['Close'].iloc[-1])
 
-metrics_df = pd.DataFrame([
-    {'Model': 'Persistence Baseline', 'Feature Set': 'Shifted Target', **get_metrics(test['target'], persistence_pred)},
-    {'Model': 'Majority Class Baseline', 'Feature Set': 'None (Train Mode)', **get_metrics(test['target'], majority_pred)},
-    {'Model': 'Logistic Regression', 'Feature Set': 'Raw (OHLCV)', **get_metrics(test['target'], pred_lr_raw)},
-    {'Model': 'Logistic Regression', 'Feature Set': 'Engineered (OHLCV+Ind)', **get_metrics(test['target'], pred_lr_eng)},
-    {'Model': 'Random Forest', 'Feature Set': 'Raw (OHLCV)', **get_metrics(test['target'], pred_rf_raw)},
-    {'Model': 'Random Forest', 'Feature Set': 'Engineered (OHLCV+Ind)', **get_metrics(test['target'], pred_rf_eng)},
-]).sort_values('Accuracy', ascending=False).reset_index(drop=True)
+# ==============================================================================
+# BEGINNER VIEW vs EXPERT VIEW
+# ==============================================================================
 
-# Next-Day Live Forecast for Latest Market Day
-latest_features_eng = scaler_eng.transform(df[features_eng].iloc[[-1]])
-latest_pred_prob = model_rf_eng.predict_proba(latest_features_eng)[0]
-latest_pred = model_rf_eng.predict(latest_features_eng)[0]
+if user_mode == "🌱 Beginner Mode (Simplified)":
 
-# Display Live Prediction Banner
-st.subheader(f"⚡ Live Forecast for Next Market Session ({ticker})")
-col_b1, col_b2, col_b3 = st.columns(3)
-with col_b1:
-    signal = "🟢 BULLISH (UP)" if latest_pred == 1 else "🔴 BEARISH (DOWN)"
-    st.metric("Predicted Direction", signal)
-with col_b2:
-    st.metric("Up Probability", f"{latest_pred_prob[1]*100:.1f}%")
-with col_b3:
-    st.metric("Down Probability", f"{latest_pred_prob[0]*100:.1f}%")
+    # Big Banner Signal
+    st.markdown("### 🎯 Tomorrow's Price Forecast")
+    
+    col_card, col_explain = st.columns([1.2, 2])
+    
+    with col_card:
+        if latest_pred == 1:
+            st.success(f"### 🟢 BULLISH / UP\n**Price likely to go higher tomorrow.**")
+            confidence = latest_prob[1] * 100
+        else:
+            st.error(f"### 🔴 BEARISH / DOWN\n**Price likely to go lower tomorrow.**")
+            confidence = latest_prob[0] * 100
+            
+        st.metric(label="AI Model Confidence", value=f"{confidence:.1f}%")
+        st.progress(confidence / 100.0)
+
+    with col_explain:
+        st.info("💡 **How to read this prediction:**")
+        st.write(f"- Current Price of **{ticker}**: **${latest_close:.2f}**")
+        st.write(f"- Based on past price patterns, our AI model estimates a **{confidence:.1f}% probability** that **{ticker}** will close **{'higher' if latest_pred == 1 else 'lower'}** on the next trading session.")
+        st.write(f"- **Historical Accuracy:** On unseen past data, this model was correct **{model_acc:.1%}** of the time (compared to simple guessing at **{majority_acc:.1%}**).")
+
+    st.markdown("---")
+
+    # Simplified Price Chart
+    st.markdown(f"### 📉 {ticker} Price History (Last 1 Year)")
+    one_year_df = df.iloc[-252:]
+    
+    fig_simple = go.Figure()
+    fig_simple.add_trace(go.Scatter(x=one_year_df.index, y=one_year_df['Close'], name='Stock Price', line=dict(color='#00F0FF', width=2.5)))
+    fig_simple.add_trace(go.Scatter(x=one_year_df.index, y=one_year_df['sma_20'], name='20-Day Trend (Average)', line=dict(color='#FF007F', dash='dash')))
+    fig_simple.update_layout(height=400, template="plotly_dark", margin=dict(l=20, r=20, t=30, b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    st.plotly_chart(fig_simple, use_container_width=True)
+
+    with st.expander("❓ What is a 20-Day Trend Line?"):
+        st.write("The dashed line shows the average stock price over the last 20 days. When the stock price is above this line, the stock is generally in an uptrend.")
+
+else:
+    # EXPERT MODE (Detailed)
+    st.subheader(f"📊 Detailed Technical Analysis & Model Audit ({ticker})")
+    
+    col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+    col_e1.metric("Current Price", f"${latest_close:.2f}")
+    col_e2.metric("Predicted Signal", "UP (1)" if latest_pred == 1 else "DOWN (0)")
+    col_e3.metric("Up Probability", f"{latest_prob[1]*100:.1f}%")
+    col_e4.metric("Test Set Accuracy", f"{model_acc:.2%}")
+    
+    st.markdown("---")
+
+    tab1, tab2 = st.tabs(["📉 Indicator Charts", "🔬 Leak-Free Benchmark Audit"])
+    
+    with tab1:
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+                            subplot_titles=(f'{ticker} Closing Price & SMA 20', 'RSI (14)', 'MACD'))
+        fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close Price', line=dict(color='#00F0FF')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['sma_20'], name='SMA 20', line=dict(color='#FF007F', dash='dash')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='#FFD700')), row=2, col=1)
+        fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['macd'], name='MACD', line=dict(color='#00FF66')), row=3, col=1)
+        fig.update_layout(height=600, template="plotly_dark")
+        st.plotly_chart(fig, use_container_width=True)
+        
+    with tab2:
+        b_test = binomtest(int(round(model_acc * len(test))), len(test), p=majority_acc, alternative='greater')
+        st.write(f"- **Random Forest Accuracy:** {model_acc:.2%}")
+        st.write(f"- **Majority Class Baseline:** {majority_acc:.2%}")
+        st.write(f"- **Statistical p-value:** {b_test.pvalue:.4f}")
+        if b_test.pvalue < 0.05:
+            st.success("✅ Statistically significant improvement over baseline (p < 0.05).")
+        else:
+            st.warning("⚠️ Improvement over baseline is not statistically significant (p >= 0.05).")
 
 st.markdown("---")
-
-# Main Layout Tabs
-tab1, tab2, tab3 = st.tabs(["📊 Stock & Indicators Chart", "🏆 Model Performance & Evaluation", "🔬 Leak-Free Methodology"])
-
-with tab1:
-    st.subheader(f"{ticker} Price & Technical Indicators")
-    
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
-                        subplot_titles=(f'{ticker} Closing Price & SMA 20', 'RSI (14)', 'MACD'))
-    
-    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close Price', line=dict(color='#00F0FF')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['sma_20'], name='SMA 20', line=dict(color='#FF007F', dash='dash')), row=1, col=1)
-    
-    fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='#FFD700')), row=2, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-    
-    fig.add_trace(go.Scatter(x=df.index, y=df['macd'], name='MACD', line=dict(color='#00FF66')), row=3, col=1)
-    
-    fig.update_layout(height=650, template="plotly_dark", showlegend=True)
-    st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    st.subheader("Model Comparison against Dual Baselines")
-    st.dataframe(metrics_df.style.format({
-        'Accuracy': '{:.2%}',
-        'Precision': '{:.2%}',
-        'Recall': '{:.2%}',
-        'F1-Score': '{:.2%}'
-    }).highlight_max(axis=0, subset=['Accuracy', 'Precision', 'Recall', 'F1-Score'], color='#1e4620'), use_container_width=True)
-    
-    # Statistical significance
-    best_model_row = metrics_df[~metrics_df['Model'].str.contains('Baseline')].iloc[0]
-    best_acc = best_model_row['Accuracy']
-    majority_acc = metrics_df[metrics_df['Model'].str.contains('Majority')]['Accuracy'].values[0]
-    
-    n_test = len(test)
-    n_correct = int(round(best_acc * n_test))
-    b_test = binomtest(n_correct, n_test, p=majority_acc, alternative='greater')
-    
-    st.markdown("### 🧪 Statistical Significance Test (Binomial Test)")
-    col_s1, col_s2, col_s3 = st.columns(3)
-    col_s1.metric("Best ML Model Accuracy", f"{best_acc:.2%}")
-    col_s2.metric("Majority Baseline Rate", f"{majority_acc:.2%}")
-    col_s3.metric("p-value", f"{b_test.pvalue:.4f}")
-    
-    if b_test.pvalue < 0.05:
-        st.success(f"✅ The best model ({best_model_row['Model']} - {best_model_row['Feature Set']}) is **statistically significantly better** than majority baseline (p < 0.05).")
-    else:
-        st.warning(f"⚠️ The performance difference over majority baseline is **not statistically significant** (p = {b_test.pvalue:.4f} >= 0.05). This confirms the difficulty of beating baseline random walk dynamics on daily stock returns.")
-
-with tab3:
-    st.subheader("🛡️ Leakage Prevention Safeguards")
-    st.markdown("""
-    - **No Look-Ahead Target Leakage**: Target $y_t = \\mathbb{I}(\\text{Close}_{t+1} > \\text{Close}_t)$ is computed before any feature aggregation or splitting.
-    - **Temporal Chronological Split**: Strictly uses past data for training and future unseen data for testing (80% / 20%). No standard random `train_test_split` is used.
-    - **Out-of-Fold Feature Scaling**: `StandardScaler` is fitted *only* on the training set to prevent statistics from the test set leaking into model normalization.
-    - **Dual Baselines Included**: Compares ML models against both Persistence (Naive shift) and Majority Class baselines to prevent illusory high accuracy metrics.
-    """)
-
-st.caption("Disclaimer: This tool is for educational and research purposes only. Not financial advice.")
+st.caption("⚠️ **Disclaimer:** For educational & demonstration purposes only. Not financial advice.")
