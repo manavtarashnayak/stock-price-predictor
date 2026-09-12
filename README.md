@@ -12,7 +12,7 @@
 ## 2. Overview
 This repository contains a reproducible, end-to-end Machine Learning pipeline built for the **GCSRM 2026 AI & ML Technical Track**. The project predicts the next-day price movement direction (**Up / Down**) for liquid equities and indices using daily historical Open-High-Low-Close-Volume (OHLCV) data. 
 
-The project prioritizes **technical rigor, strict data leakage prevention, naive baseline comparisons, chronological evaluation, and honest statistical analysis**.
+The project prioritizes **technical rigor, strict data leakage prevention, naive baseline comparisons, chronological evaluation, and honest statistical analysis**. It includes an interactive **Streamlit Web Dashboard** (`app.py`) for real-time predictions and model inspection.
 
 ---
 
