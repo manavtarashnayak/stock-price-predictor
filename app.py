@@ -1,8 +1,11 @@
+# pyrefly: ignore [missing-import]
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+# pyrefly: ignore [missing-import]
 import plotly.graph_objects as go
+# pyrefly: ignore [missing-import]
 from plotly.subplots import make_subplots
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
@@ -126,23 +129,40 @@ test_ratio = 0.2
 
 @st.cache_data(ttl=3600)
 def fetch_and_process_market_data(symbol):
-    data = yf.download(symbol, start="2018-01-01")
-    if data.empty:
-        return None
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = data.columns.get_level_values(0)
+    try:
+        data = yf.download(symbol, start="2018-01-01", progress=False)
+        if data is None or data.empty:
+            return None
+            
+        if isinstance(data.columns, pd.MultiIndex):
+            if symbol in data.columns.levels[1]:
+                data = data.xs(symbol, axis=1, level=1)
+            else:
+                data.columns = data.columns.get_level_values(0)
+                
+        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        if not all(col in data.columns for col in required_cols):
+            return None
+            
+        df = data[required_cols].copy()
         
-    df = data[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
-    df['target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
-    
-    # Technical Indicators
-    df['rsi'] = ta.momentum.RSIIndicator(close=df['Close'], window=14).rsi()
-    df['macd'] = ta.trend.MACD(close=df['Close']).macd()
-    df['sma_20'] = df['Close'].rolling(window=20).mean()
-    df['ema_50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    
-    df = df.dropna()
-    return df
+        # Ensure 1D Series for all price columns
+        for col in required_cols:
+            if isinstance(df[col], pd.DataFrame):
+                df[col] = df[col].iloc[:, 0]
+                
+        df['target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
+        
+        # Technical Indicators
+        df['rsi'] = ta.momentum.RSIIndicator(close=df['Close'], window=14).rsi()
+        df['macd'] = ta.trend.MACD(close=df['Close']).macd()
+        df['sma_20'] = df['Close'].rolling(window=20).mean()
+        df['ema_50'] = df['Close'].ewm(span=50, adjust=False).mean()
+        
+        df = df.dropna()
+        return df
+    except Exception:
+        return None
 
 with st.spinner(f"Retrieving market dataset for {ticker}..."):
     df = fetch_and_process_market_data(ticker)
@@ -313,7 +333,9 @@ if show_macd:
     current_row += 1
 
 if show_volume:
-    colors = ['#089981' if c >= o else '#f23645' for c, o in zip(chart_df['Close'], chart_df['Open'])]
+    close_arr = chart_df['Close'].to_numpy().ravel()
+    open_arr = chart_df['Open'].to_numpy().ravel()
+    colors = ['#089981' if c >= o else '#f23645' for c, o in zip(close_arr, open_arr)]
     fig.add_trace(go.Bar(
         x=chart_df.index, 
         y=chart_df['Volume'], 
